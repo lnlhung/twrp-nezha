@@ -1,0 +1,123 @@
+name: Build TWRP Xiaomi 17 Ultra (nezha) - HyperOS 4
+
+# Builds TWRP 3.7.1 for Xiaomi 17 Ultra (nezha) from MissMyTime/twrp_device_sm8850.
+# That tree (Oct 2026 updates) reads the installed system's Android version and
+# security patch at runtime and hands them to KeyMint before decrypting, detects
+# the Goodix or Thales Weaver backend, and refuses to write back upgraded key blobs.
+# Workflow structure adapted from YuKongA/twrp_device_xiaomi_sm8850.
+
+on:
+  workflow_dispatch:
+    inputs:
+      TWRP_MANIFEST_URL:
+        description: "TWRP manifest url"
+        required: true
+        default: "https://github.com/TWRP-Test/platform_manifest_twrp_aosp"
+      TWRP_MANIFEST_BRANCH:
+        description: "TWRP manifest branch"
+        required: true
+        default: "twrp-16.0"
+      DEVICE_REPO_URL:
+        description: "Device repo url"
+        required: true
+        default: "https://github.com/MissMyTime/twrp_device_sm8850"
+      DEVICE_REPO_REF:
+        description: "Device repo branch or commit"
+        required: true
+        default: "main"
+
+env:
+  CODENAME: nezha
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - name: Build info
+      run: |
+        echo "BUILD_DATE=$(date +%F)" >> "$GITHUB_ENV"
+        {
+          echo "Manifest: ${{ github.event.inputs.TWRP_MANIFEST_URL }} (${{ github.event.inputs.TWRP_MANIFEST_BRANCH }})"
+          echo "Device repo: ${{ github.event.inputs.DEVICE_REPO_URL }} (${{ github.event.inputs.DEVICE_REPO_REF }})"
+          echo "Build date: $(date)"
+          echo ""
+          echo "Flash to the CURRENT recovery slot only (fastboot boot is not supported):"
+          echo "  fastboot getvar current-slot"
+          echo "  fastboot --slot=<a|b> flash recovery <this-image>.img"
+          echo "Decryption is manual in this build (TW_NO_AUTO_DECRYPT)."
+        } > /tmp/INFO.txt
+
+    - name: Free disk space
+      uses: rokibhasansagar/slimhub_actions@main
+
+    - name: Maximize build space
+      uses: easimon/maximize-build-space@master
+
+    - name: Show free space
+      run: |
+        df -h "$GITHUB_WORKSPACE"
+
+    - name: Setup ccache
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        create-symlink: true
+
+    - name: Setup zram
+      run: |
+        sudo apt install linux-modules-extra-$(uname -r) zram-tools -y
+        sudo modprobe zram
+        sudo sed -i 's/^#PERCENT=50/PERCENT=90/' /etc/default/zramswap
+        sudo sed -i 's/^#PRIORITY=100/PRIORITY=1000/' /etc/default/zramswap
+        sudo systemctl restart zramswap
+        zramctl
+
+    - name: Setup environment
+      run: |
+        export DEBIAN_FRONTEND=noninteractive
+        sudo apt update
+        sudo apt install -y repo rsync lz4 zstd
+        git config --global user.name "${{ github.actor }}"
+        git config --global user.email "${{ github.actor }}@users.noreply.github.com"
+
+    - name: Sync TWRP source
+      run: |
+        repo init -u "${{ github.event.inputs.TWRP_MANIFEST_URL }}" -b "${{ github.event.inputs.TWRP_MANIFEST_BRANCH }}" --depth=1
+        (while true; do echo "Syncing source..."; sleep 60; done) &
+        TIP_PID=$!
+        repo sync -c --no-tags --no-clone-bundle -j$(nproc --all)
+        kill $TIP_PID || true
+
+    - name: Clone device repo
+      run: |
+        git clone "${{ github.event.inputs.DEVICE_REPO_URL }}" twrp_device_sm8850
+        cd twrp_device_sm8850
+        git checkout "${{ github.event.inputs.DEVICE_REPO_REF }}"
+        echo "Device repo commit: $(git log -1 --format='%h %ad %s' --date=short)" >> /tmp/INFO.txt
+
+    - name: Build TWRP (sync tree, apply patches, build)
+      run: |
+        export ALLOW_MISSING_DEPENDENCIES=true
+        export SKIP_ABI_CHECKS=true
+        export CCACHE_DIR=.ccache
+        export CCACHE_EXEC=$(command -v ccache)
+        export CCACHE_MAXSIZE=5G
+        export USE_CCACHE=1
+        (while true; do echo "$(date +%T) Building TWRP..."; free -h | head -2; sleep 30; done) &
+        TIP_PID=$!
+        TWRP_SOURCE="$GITHUB_WORKSPACE" bash twrp_device_sm8850/scripts/build.sh "$CODENAME"
+        kill $TIP_PID || true
+        IMG="out/target/product/${CODENAME}/recovery.img"
+        ls -lh "$IMG"
+        mv "$IMG" "out/target/product/${CODENAME}/TWRP-3.7.1-nezha-OS4-${BUILD_DATE}.img"
+
+    - name: Upload to Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: out/target/product/${{ env.CODENAME }}/TWRP-3.7.1-nezha-OS4-${{ env.BUILD_DATE }}.img
+        name: TWRP-3.7.1-nezha-OS4-${{ env.BUILD_DATE }}-${{ github.run_id }}
+        tag_name: nezha-os4-${{ env.BUILD_DATE }}-${{ github.run_id }}
+        body_path: /tmp/INFO.txt
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
