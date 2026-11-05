@@ -26,7 +26,7 @@ on:
         required: true
         default: "d76b4dd"
       PIN_TWRP_SOURCES:
-        description: "Pin recovery/vold/build to 2026-10-26 (matches the device repo's patches)"
+        description: "Pin all TWRP-Test projects to 2026-08-23 (the base the device repo was written against)"
         type: boolean
         required: true
         default: true
@@ -104,19 +104,47 @@ jobs:
     - name: Pin TWRP sources to the device repo's baseline
       if: ${{ github.event.inputs.PIN_TWRP_SOURCES == 'true' }}
       run: |
-        # On 2026-10-27..11-03 TWRP-Test removed the classic UI, refactored storage
-        # handling and changed vold. The device repo's full-file replacements and
-        # patches were written against the tree before that, so pin these three
-        # projects to their last commits before 2026-10-26 18:00 +08:00.
+        # The device repo's full-file replacements target TWRP-Test bootable/recovery
+        # as of 2026-08-23 17:07 (+08:00): its files still live in minuitwrp/ (renamed
+        # to twrpminui/ at 17:16 that day), use libguitwrp (renamed 08-25), and its
+        # Android.mk builds the recovery binary (moved to Soong 08-27). Pin every
+        # TWRP-Test project to its last commit before 2026-08-23 17:10 +08:00 so the
+        # whole tree matches that snapshot.
         pin() {
-          git -C "$1" fetch -q --depth=1 "$2" "$3"
+          git -C "$1" fetch -q --depth=1 "https://github.com/TWRP-Test/$2" "$3"
           git -C "$1" checkout -q -f FETCH_HEAD
           git -C "$1" clean -qfd
           echo "$1 -> $(git -C "$1" log -1 --format='%h %cs %s')" | tee -a /tmp/INFO.txt
         }
-        pin bootable/recovery https://github.com/TWRP-Test/android_bootable_recovery af266a8ec2927f1cb1611d826dca5a0eeff172ad
-        pin system/vold       https://github.com/TWRP-Test/android_system_vold      4c83041ec61f9b482085685f1e6aed5a62f103aa
-        pin build/make        https://github.com/TWRP-Test/android_build            74715e25d7c2ede6ae00db69d08970e3cf81c20c
+        while read -r path repo sha; do
+          [ -n "$path" ] && pin "$path" "$repo" "$sha"
+        done <<'PINS'
+          bootable/recovery              android_bootable_recovery                32afb7287bcc19b4a38380704b846c32f9fab77b
+          external/lvgl                  android_external_lvgl                    7cc13aafaa2e7acab6cf3c1977ab6ca70b6c2ed7
+          external/libvpx                android_external_libvpx                  718dd469f67964d8f5fd4c8ebf09513bbfa50146
+          external/libwebm               android_external_libwebm                 103e46e4cd4b6efcf6001f23fa8665fb110abf8d
+          build/make                     android_build                            3b5b2b43b8e2200ef92b7b814a84c8dde8b74121
+          build/soong                    android_build_soong                      91bdc79cffb29d35b2d46a33204c061c3e7ed4f7
+          external/exfatprogs            android_external_exfatprogs              a227032b66d1256eb912f6c443ae2a00799dbc27
+          external/freetype              android_external_freetype                d968d2541f7158e18ab22680bfa08a538019bf6a
+          external/icu                   android_external_icu                     6fefff4e125c1b1a332fbce6d0d2da323b203865
+          external/scrypt                android_external_scrypt                  19e0168446d3955ab17c56be1f1d1eb92616c44a
+          external/wpa_supplicant_8      android_external_wpa_supplicant_8        70643f677105873084d69bdc239297ee0d337871
+          frameworks/base                android_frameworks_base                  99b01a65cc4c104933788b3143285ab6bae65827
+          hardware/interfaces            android_hardware_interfaces              185265a4c2dccc7f6770ea08eddd36a15b2035b6
+          system/core                    android_system_core                      ea939a2ec81a18190dfbd18b2642ddc22af4c0a0
+          system/extras                  android_system_extras                    e7a43388bdbb2774b955ed5c7fca1fa83fd61c64
+          system/hardware/interfaces     android_system_hardware_interfaces       f3d42be8ff32eb4ff00873bf2762d13c013d314a
+          system/keymaster               android_system_keymaster                 1d26bd0ab27ccf3ed1af84e6514026ea4167bf3f
+          system/libziparchive           android_system_libziparchive             8c51527debf9394dfa515f7e6c7941d2720c6d01
+          system/sepolicy                android_system_sepolicy                  bb100837941584a7d0f8c2969eeaebf9c56da8fc
+          system/update_engine           android_system_update_engine             b451120ede75393948160631f699c419f427a692
+          system/vold                    android_system_vold                      4c83041ec61f9b482085685f1e6aed5a62f103aa
+          vendor/twrp                    android_vendor_twrp                      9633d05e4aa67faf8ed46bb775c77d6cad17fb42
+          external/libncurses            android_external_libncurses              cf8d1a3f3b0ab6f9385c3361e1aada7ecc635ad6
+          external/se_omapi              android_se_omapi                         637d1911a25ee1f9ee81fded6979a78074ba646f
+          external/magisk-prebuilt       external_magisk-prebuilt                 0fc7153ab07e73b8f63a0f5cc9e9ec91dc61ff78
+        PINS
 
     - name: Clone device repo
       run: |
@@ -128,6 +156,11 @@ jobs:
         # patch copies (Android.bp/.mk/.go). Tell Soong's finder to skip it; build.sh
         # copies only the nezha tree and patch files into their real locations.
         touch .find-ignore
+        # patches/common/files/bootable/recovery/etc/Android.bp redefines
+        # init_recovery.rc, which bootable/recovery/Android.bp already defines with the
+        # same source (etc/init.rc -> init/hw/init.rc). Soong rejects the duplicate,
+        # so drop the copy; the installed init.rc is unchanged.
+        rm -f patches/common/files/bootable/recovery/etc/Android.bp
 
     - name: Build TWRP (sync tree, apply patches, build)
       run: |
