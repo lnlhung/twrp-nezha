@@ -71,18 +71,39 @@ jobs:
       with:
         create-symlink: true
 
-    - name: Setup zram (optional)
+    - name: Setup compressed swap (zram, else zswap) and protect the runner
       continue-on-error: true
       run: |
-        sudo apt-get update
-        if sudo apt-get install -y "linux-modules-extra-$(uname -r)" zram-tools && sudo modprobe zram; then
-          sudo sed -i 's/^#PERCENT=50/PERCENT=90/' /etc/default/zramswap
-          sudo sed -i 's/^#PRIORITY=100/PRIORITY=1000/' /etc/default/zramswap
-          sudo systemctl restart zramswap
-          zramctl
-        else
-          echo "zram is not available on this runner kernel; using the 16 GB swap file instead."
+        # soong_build needs ~20 GiB on a TWRP tree; the runner has 15.6 GiB. Plain
+        # disk swap is too slow (run #6: "hosted runner lost communication").
+        # Compressed swap in RAM is what lets other TWRP trees build on these runners.
+        sudo sysctl -w vm.swappiness=150 || sudo sysctl -w vm.swappiness=100
+        if ! sudo modprobe zram 2>/dev/null; then
+          sudo apt-get update -qq
+          sudo apt-get install -y "linux-modules-extra-$(uname -r)" >/dev/null 2>&1 && sudo modprobe zram || true
         fi
+        ZRAM_DEV=""
+        if [ -e /sys/class/zram-control ] || [ -e /sys/block/zram0 ]; then
+          ZRAM_DEV=$(sudo zramctl --find --size 14G --algorithm zstd 2>/dev/null || sudo zramctl --find --size 14G 2>/dev/null || true)
+          if [ -n "$ZRAM_DEV" ] && sudo mkswap "$ZRAM_DEV" >/dev/null && sudo swapon -p 1000 "$ZRAM_DEV"; then
+            echo "zram enabled on $ZRAM_DEV"
+          else
+            ZRAM_DEV=""
+          fi
+        fi
+        if [ -z "$ZRAM_DEV" ]; then
+          echo "zram unavailable on kernel $(uname -r); enabling zswap in front of the swap file"
+          echo 1 | sudo tee /sys/module/zswap/parameters/enabled
+          echo zstd | sudo tee /sys/module/zswap/parameters/compressor || echo lz4 | sudo tee /sys/module/zswap/parameters/compressor || true
+          echo 60 | sudo tee /sys/module/zswap/parameters/max_pool_percent || true
+          grep -H . /sys/module/zswap/parameters/* || true
+        fi
+        # Keep the runner agent out of the OOM killer's reach so a memory problem
+        # shows up as a build error instead of a lost runner.
+        for p in $(pgrep -f 'Runner.Listener|Runner.Worker'); do
+          echo -1000 | sudo tee /proc/$p/oom_score_adj >/dev/null || true
+        done
+        swapon --show
         free -h
 
     - name: Setup environment
@@ -172,12 +193,16 @@ jobs:
         export CCACHE_EXEC=$(command -v ccache)
         export CCACHE_MAXSIZE=5G
         export USE_CCACHE=1
-        # Make soong_build's Go runtime collect garbage near 11 GiB instead of
-        # growing to ~20 GiB and getting OOM-killed (needs build/soong 45b9630+).
-        export SOONG_GOMEMLIMIT=11GiB
+        # Let soong_build's Go runtime collect garbage as it nears 16 GiB (needs
+        # build/soong 45b9630+). With compressed swap this avoids both endless GC at
+        # a too-low cap and unbounded growth to ~20 GiB.
+        export SOONG_GOMEMLIMIT=16GiB
+        # If memory still runs out, the OOM killer should take the build, not the runner.
+        echo 500 > /proc/$$/oom_score_adj || true
         (while true; do echo "$(date +%T) Building TWRP..."; free -h; sleep 30; done) &
         TIP_PID=$!
-        TWRP_SOURCE="$GITHUB_WORKSPACE" bash twrp_device_sm8850/scripts/build.sh "$CODENAME"
+        # Lower CPU priority so the runner agent keeps answering the server.
+        TWRP_SOURCE="$GITHUB_WORKSPACE" nice -n 10 bash twrp_device_sm8850/scripts/build.sh "$CODENAME"
         kill $TIP_PID || true
         IMG="out/target/product/${CODENAME}/recovery.img"
         ls -lh "$IMG"
