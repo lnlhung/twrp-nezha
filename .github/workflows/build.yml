@@ -54,6 +54,8 @@ jobs:
 
     - name: Maximize build space
       uses: easimon/maximize-build-space@master
+      with:
+        swap-size-mb: 16384
 
     - name: Show free space
       run: |
@@ -64,14 +66,19 @@ jobs:
       with:
         create-symlink: true
 
-    - name: Setup zram
+    - name: Setup zram (optional)
+      continue-on-error: true
       run: |
-        sudo apt install linux-modules-extra-$(uname -r) zram-tools -y
-        sudo modprobe zram
-        sudo sed -i 's/^#PERCENT=50/PERCENT=90/' /etc/default/zramswap
-        sudo sed -i 's/^#PRIORITY=100/PRIORITY=1000/' /etc/default/zramswap
-        sudo systemctl restart zramswap
-        zramctl
+        sudo apt-get update
+        if sudo apt-get install -y "linux-modules-extra-$(uname -r)" zram-tools && sudo modprobe zram; then
+          sudo sed -i 's/^#PERCENT=50/PERCENT=90/' /etc/default/zramswap
+          sudo sed -i 's/^#PRIORITY=100/PRIORITY=1000/' /etc/default/zramswap
+          sudo systemctl restart zramswap
+          zramctl
+        else
+          echo "zram is not available on this runner kernel; using the 16 GB swap file instead."
+        fi
+        free -h
 
     - name: Setup environment
       run: |
