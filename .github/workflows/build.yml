@@ -24,7 +24,12 @@ on:
       DEVICE_REPO_REF:
         description: "Device repo branch or commit"
         required: true
-        default: "main"
+        default: "d76b4dd"
+      PIN_TWRP_SOURCES:
+        description: "Pin recovery/vold/build to 2026-10-26 (matches the device repo's patches)"
+        type: boolean
+        required: true
+        default: true
 
 env:
   CODENAME: nezha
@@ -95,6 +100,23 @@ jobs:
         TIP_PID=$!
         repo sync -c --no-tags --no-clone-bundle -j$(nproc --all)
         kill $TIP_PID || true
+
+    - name: Pin TWRP sources to the device repo's baseline
+      if: ${{ github.event.inputs.PIN_TWRP_SOURCES == 'true' }}
+      run: |
+        # On 2026-10-27..11-03 TWRP-Test removed the classic UI, refactored storage
+        # handling and changed vold. The device repo's full-file replacements and
+        # patches were written against the tree before that, so pin these three
+        # projects to their last commits before 2026-10-26 18:00 +08:00.
+        pin() {
+          git -C "$1" fetch -q --depth=1 "$2" "$3"
+          git -C "$1" checkout -q -f FETCH_HEAD
+          git -C "$1" clean -qfd
+          echo "$1 -> $(git -C "$1" log -1 --format='%h %cs %s')" | tee -a /tmp/INFO.txt
+        }
+        pin bootable/recovery https://github.com/TWRP-Test/android_bootable_recovery af266a8ec2927f1cb1611d826dca5a0eeff172ad
+        pin system/vold       https://github.com/TWRP-Test/android_system_vold      4c83041ec61f9b482085685f1e6aed5a62f103aa
+        pin build/make        https://github.com/TWRP-Test/android_build            74715e25d7c2ede6ae00db69d08970e3cf81c20c
 
     - name: Clone device repo
       run: |
