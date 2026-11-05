@@ -124,6 +124,10 @@ jobs:
         cd twrp_device_sm8850
         git checkout "${{ github.event.inputs.DEVICE_REPO_REF }}"
         echo "Device repo commit: $(git log -1 --format='%h %ad %s' --date=short)" >> /tmp/INFO.txt
+        # The repo sits inside the source root but carries other devices' trees and
+        # patch copies (Android.bp/.mk/.go). Tell Soong's finder to skip it; build.sh
+        # copies only the nezha tree and patch files into their real locations.
+        touch .find-ignore
 
     - name: Build TWRP (sync tree, apply patches, build)
       run: |
