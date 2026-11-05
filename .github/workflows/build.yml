@@ -109,7 +109,9 @@ jobs:
         # to twrpminui/ at 17:16 that day), use libguitwrp (renamed 08-25), and its
         # Android.mk builds the recovery binary (moved to Soong 08-27). Pin every
         # TWRP-Test project to its last commit before 2026-08-23 17:10 +08:00 so the
-        # whole tree matches that snapshot.
+        # whole tree matches that snapshot. Exception: build/soong takes 45b9630
+        # (2026-08-29, parent = the 08-23 pin), which only adds SOONG_GOMEMLIMIT so
+        # soong_build (~20 GiB heap on a TWRP tree) is not OOM-killed on a 16 GB runner.
         pin() {
           git -C "$1" fetch -q --depth=1 "https://github.com/TWRP-Test/$2" "$3"
           git -C "$1" checkout -q -f FETCH_HEAD
@@ -124,7 +126,7 @@ jobs:
           external/libvpx                android_external_libvpx                  718dd469f67964d8f5fd4c8ebf09513bbfa50146
           external/libwebm               android_external_libwebm                 103e46e4cd4b6efcf6001f23fa8665fb110abf8d
           build/make                     android_build                            3b5b2b43b8e2200ef92b7b814a84c8dde8b74121
-          build/soong                    android_build_soong                      91bdc79cffb29d35b2d46a33204c061c3e7ed4f7
+          build/soong                    android_build_soong                      45b96302f60bd3b254dded1017ad403e2b4399f3
           external/exfatprogs            android_external_exfatprogs              a227032b66d1256eb912f6c443ae2a00799dbc27
           external/freetype              android_external_freetype                d968d2541f7158e18ab22680bfa08a538019bf6a
           external/icu                   android_external_icu                     6fefff4e125c1b1a332fbce6d0d2da323b203865
@@ -170,7 +172,10 @@ jobs:
         export CCACHE_EXEC=$(command -v ccache)
         export CCACHE_MAXSIZE=5G
         export USE_CCACHE=1
-        (while true; do echo "$(date +%T) Building TWRP..."; free -h | head -2; sleep 30; done) &
+        # Make soong_build's Go runtime collect garbage near 11 GiB instead of
+        # growing to ~20 GiB and getting OOM-killed (needs build/soong 45b9630+).
+        export SOONG_GOMEMLIMIT=11GiB
+        (while true; do echo "$(date +%T) Building TWRP..."; free -h; sleep 30; done) &
         TIP_PID=$!
         TWRP_SOURCE="$GITHUB_WORKSPACE" bash twrp_device_sm8850/scripts/build.sh "$CODENAME"
         kill $TIP_PID || true
