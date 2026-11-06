@@ -26,7 +26,7 @@ on:
         required: true
         default: "d76b4dd"
       PIN_TWRP_SOURCES:
-        description: "Pin all TWRP-Test projects to 2026-08-23 (the base the device repo was written against)"
+        description: "Pin all TWRP-Test projects to end of July 2026 (the base the device repo was written against)"
         type: boolean
         required: true
         default: true
@@ -125,14 +125,15 @@ jobs:
     - name: Pin TWRP sources to the device repo's baseline
       if: ${{ github.event.inputs.PIN_TWRP_SOURCES == 'true' }}
       run: |
-        # The device repo's full-file replacements target TWRP-Test bootable/recovery
-        # as of 2026-08-23 17:07 (+08:00): its files still live in minuitwrp/ (renamed
-        # to twrpminui/ at 17:16 that day), use libguitwrp (renamed 08-25), and its
-        # Android.mk builds the recovery binary (moved to Soong 08-27). Pin every
-        # TWRP-Test project to its last commit before 2026-08-23 17:10 +08:00 so the
-        # whole tree matches that snapshot. Exception: build/soong takes 45b9630
-        # (2026-08-29, parent = the 08-23 pin), which only adds SOONG_GOMEMLIMIT so
-        # soong_build (~20 GiB heap on a TWRP tree) is not OOM-killed on a 16 GB runner.
+        # The device repo's bootable/recovery replacements were frozen on 2026-07-20
+        # (commit 1b20d69) and its Android.mk still includes mtp/ffs, minzip, mmcutils
+        # and 20+ other legacy dirs that TWRP-Test deleted from 2026-08-02 on; it also
+        # needs external/magisk-prebuilt/Android.mk (dropped 08-23). The author's
+        # 2026-10-25 nezha commit says the reference "July image" was built that way.
+        # So pin every TWRP-Test project to its last commit before 2026-07-30 +08:00
+        # (bootable/recovery had no commits between 06-09 and 08-02). Exception:
+        # build/soong takes 45b9630, whose parent is the July pin and which only adds
+        # SOONG_GOMEMLIMIT so soong_build is not OOM-killed on a 16 GB runner.
         pin() {
           git -C "$1" fetch -q --depth=1 "https://github.com/TWRP-Test/$2" "$3"
           git -C "$1" checkout -q -f FETCH_HEAD
@@ -142,11 +143,11 @@ jobs:
         while read -r path repo sha; do
           [ -n "$path" ] && pin "$path" "$repo" "$sha"
         done <<'PINS'
-          bootable/recovery              android_bootable_recovery                32afb7287bcc19b4a38380704b846c32f9fab77b
-          external/lvgl                  android_external_lvgl                    7cc13aafaa2e7acab6cf3c1977ab6ca70b6c2ed7
+          bootable/recovery              android_bootable_recovery                6bd8134ec8ff4cb29eb25797cbb20796f8455204
+          external/lvgl                  android_external_lvgl                    33d45e31db0276902c61dca4d0d013307acea577
           external/libvpx                android_external_libvpx                  718dd469f67964d8f5fd4c8ebf09513bbfa50146
           external/libwebm               android_external_libwebm                 103e46e4cd4b6efcf6001f23fa8665fb110abf8d
-          build/make                     android_build                            3b5b2b43b8e2200ef92b7b814a84c8dde8b74121
+          build/make                     android_build                            f490f0230a24ec66f27c88a9374fbeeffa6b9c27
           build/soong                    android_build_soong                      45b96302f60bd3b254dded1017ad403e2b4399f3
           external/exfatprogs            android_external_exfatprogs              a227032b66d1256eb912f6c443ae2a00799dbc27
           external/freetype              android_external_freetype                d968d2541f7158e18ab22680bfa08a538019bf6a
@@ -155,18 +156,18 @@ jobs:
           external/wpa_supplicant_8      android_external_wpa_supplicant_8        70643f677105873084d69bdc239297ee0d337871
           frameworks/base                android_frameworks_base                  99b01a65cc4c104933788b3143285ab6bae65827
           hardware/interfaces            android_hardware_interfaces              185265a4c2dccc7f6770ea08eddd36a15b2035b6
-          system/core                    android_system_core                      ea939a2ec81a18190dfbd18b2642ddc22af4c0a0
+          system/core                    android_system_core                      1f21da0fc4300c5802da8f4aad885875da950032
           system/extras                  android_system_extras                    e7a43388bdbb2774b955ed5c7fca1fa83fd61c64
           system/hardware/interfaces     android_system_hardware_interfaces       f3d42be8ff32eb4ff00873bf2762d13c013d314a
           system/keymaster               android_system_keymaster                 1d26bd0ab27ccf3ed1af84e6514026ea4167bf3f
           system/libziparchive           android_system_libziparchive             8c51527debf9394dfa515f7e6c7941d2720c6d01
           system/sepolicy                android_system_sepolicy                  bb100837941584a7d0f8c2969eeaebf9c56da8fc
           system/update_engine           android_system_update_engine             b451120ede75393948160631f699c419f427a692
-          system/vold                    android_system_vold                      4c83041ec61f9b482085685f1e6aed5a62f103aa
-          vendor/twrp                    android_vendor_twrp                      9633d05e4aa67faf8ed46bb775c77d6cad17fb42
+          system/vold                    android_system_vold                      953de9608eb78380b3c4e39e801c2bc0af7dbddc
+          vendor/twrp                    android_vendor_twrp                      f5b908030195b41271ff39f1c707bb716271c478
           external/libncurses            android_external_libncurses              cf8d1a3f3b0ab6f9385c3361e1aada7ecc635ad6
           external/se_omapi              android_se_omapi                         637d1911a25ee1f9ee81fded6979a78074ba646f
-          external/magisk-prebuilt       external_magisk-prebuilt                 0fc7153ab07e73b8f63a0f5cc9e9ec91dc61ff78
+          external/magisk-prebuilt       external_magisk-prebuilt                 1e91763f0e216c2a674d018811967e0837b27e0e
         PINS
 
     - name: Clone device repo
