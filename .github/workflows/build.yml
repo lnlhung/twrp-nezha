@@ -163,12 +163,23 @@ jobs:
           system/libziparchive           android_system_libziparchive             8c51527debf9394dfa515f7e6c7941d2720c6d01
           system/sepolicy                android_system_sepolicy                  bb100837941584a7d0f8c2969eeaebf9c56da8fc
           system/update_engine           android_system_update_engine             b451120ede75393948160631f699c419f427a692
-          system/vold                    android_system_vold                      953de9608eb78380b3c4e39e801c2bc0af7dbddc
+          system/vold                    android_system_vold                      12036549af8e3f3400b99cfba8e5375c267c2858
           vendor/twrp                    android_vendor_twrp                      f5b908030195b41271ff39f1c707bb716271c478
           external/libncurses            android_external_libncurses              cf8d1a3f3b0ab6f9385c3361e1aada7ecc635ad6
           external/se_omapi              android_se_omapi                         637d1911a25ee1f9ee81fded6979a78074ba646f
           external/magisk-prebuilt       external_magisk-prebuilt                 1e91763f0e216c2a674d018811967e0837b27e0e
         PINS
+        # system/vold: the device repo's nezha Decrypt.cpp calls
+        # KeystoreInfo::backupDatabase, which first appears in 1203654 (2026-08-02),
+        # so vold is pinned there rather than to the July commit. That same commit
+        # renamed android::keystore::copySqliteDb() to syncKeystoreDb() in Decrypt.h,
+        # while the device repo's Decrypt.cpp and twrp.cpp still define and call
+        # copySqliteDb(). Nothing else in vold or recovery uses either name and no
+        # other header changed between the two commits apart from an internal
+        # sehandle accessor the device files do not touch, so declare the old name too.
+        sed -i 's/^\([[:space:]]*\)bool syncKeystoreDb();/&\n\1void copySqliteDb();/' system/vold/Decrypt.h
+        grep -n 'copySqliteDb\|syncKeystoreDb' system/vold/Decrypt.h
+        grep -q 'void copySqliteDb();' system/vold/Decrypt.h
 
     - name: Clone device repo
       run: |
